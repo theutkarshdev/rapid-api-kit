@@ -1,0 +1,45 @@
+{
+  "name": "@theutkarshdev/rapid-api-kit",
+  "version": "1.0.0",
+  "description": "Zero-config REST API generator. Give your MongoDB creds + schema, get full CRUD endpoints with Swagger docs instantly. Built for frontend students who need quick APIs.",
+  "main": "src/index.js",
+  "files": [
+    "src/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "example": "node example/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "rest-api",
+    "api-generator",
+    "express",
+    "mongoose",
+    "swagger",
+    "crud",
+    "backend",
+    "rapid-api",
+    "auto-api",
+    "frontend-students",
+    "mock-api",
+    "api-scaffold"
+  ],
+  "author": "rapid-api <theutkarshdev>",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "mongoose": "^8.0.0",
+    "morgan": "^1.10.0",
+    "swagger-ui-express": "^5.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
