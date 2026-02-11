@@ -1,6 +1,6 @@
 {
   "name": "@theutkarshdev/rapid-api-kit",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Zero-config REST API generator. Give your MongoDB creds + schema, get full CRUD endpoints with Swagger docs instantly. Built for frontend students who need quick APIs.",
   "main": "src/index.js",
   "files": [
