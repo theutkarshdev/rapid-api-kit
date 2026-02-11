@@ -18,11 +18,12 @@ const TYPE_MAP = {
 
 function resolveSwaggerType(fieldDef) {
   // Handle shorthand: { name: String } or { name: "String" }
+  // Always spread to avoid mutating the shared TYPE_MAP objects
   if (typeof fieldDef === "function") {
-    return TYPE_MAP[fieldDef.name] || { type: "string" };
+    return { ...(TYPE_MAP[fieldDef.name] || { type: "string" }) };
   }
   if (typeof fieldDef === "string") {
-    return TYPE_MAP[fieldDef] || { type: "string" };
+    return { ...(TYPE_MAP[fieldDef] || { type: "string" }) };
   }
 
   // Handle array syntax: [String] or [{ type: String }]
@@ -87,6 +88,32 @@ function buildSchemaProperties(schema) {
   }
 
   return { properties, required };
+}
+
+/**
+ * Build a clean schema for a filter query parameter.
+ * - enum fields   → keep enum array so Swagger UI shows a dropdown
+ * - boolean fields → add explicit enum [true, false] for a dropdown
+ * - everything else → bare type only (plain text input, no suggestions)
+ */
+function buildFilterParamSchema(fieldSchema) {
+  const schema = { type: fieldSchema.type };
+
+  if (fieldSchema.enum) {
+    // Enum field → dropdown
+    schema.enum = fieldSchema.enum;
+  } else if (fieldSchema.type === "boolean") {
+    // Boolean without explicit enum → dropdown with true / false
+    schema.enum = [true, false];
+  }
+
+  // Preserve format (e.g. date-time) so Swagger renders the correct input
+  if (fieldSchema.format) {
+    schema.format = fieldSchema.format;
+  }
+
+  // Intentionally omit `default` so filters don't get pre-filled
+  return schema;
 }
 
 function generateSwaggerDoc(resources, options = {}) {
@@ -175,23 +202,34 @@ function generateSwaggerDoc(resources, options = {}) {
               ]
             : []),
           // Only show filterable fields as query params
+          // enum / boolean → dropdown, everything else → plain text input
           ...(filterBy.length > 0
             ? filterBy
                 .filter((field) => properties[field])
-                .map((field) => ({
+                .map((field) => {
+                  const paramSchema = buildFilterParamSchema(properties[field]);
+                  return {
+                    name: field,
+                    in: "query",
+                    schema: paramSchema,
+                    description: paramSchema.enum
+                      ? `Filter by ${field} (${paramSchema.enum.join(", ")})`
+                      : `Filter by ${field}`,
+                    required: false,
+                  };
+                })
+            : Object.keys(properties).map((field) => {
+                const paramSchema = buildFilterParamSchema(properties[field]);
+                return {
                   name: field,
                   in: "query",
-                  schema: properties[field],
-                  description: `Filter by ${field}`,
+                  schema: paramSchema,
+                  description: paramSchema.enum
+                    ? `Filter by ${field} (${paramSchema.enum.join(", ")})`
+                    : `Filter by ${field}`,
                   required: false,
-                }))
-            : Object.keys(properties).map((field) => ({
-                name: field,
-                in: "query",
-                schema: properties[field],
-                description: `Filter by ${field}`,
-                required: false,
-              }))),
+                };
+              })),
         ],
         responses: {
           200: {

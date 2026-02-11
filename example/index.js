@@ -2,7 +2,7 @@ const { rapidAPI } = require("../src/index");
 
 rapidAPI({
   mongoURI: "mongodb://localhost:27017/my_school_db",
-  port: 3000,
+  port: 8000,
   resources: [
     {
       name: "students",
