@@ -25,6 +25,7 @@ Plus:
 - **Pagination** — `?page=1&limit=10`
 - **Sorting** — `?sort=-createdAt` or `?sort=name`
 - **Filtering** — `?name=John&age_gte=18`
+- **Search** — `?search=keyword` across configured fields
 - **Field selection** — `?fields=name,email`
 - **Validation** — Mongoose schema validation with clear error messages
 - **CORS** enabled by default
@@ -35,7 +36,7 @@ Plus:
 ## Installation
 
 ```bash
-npm install rapid-api-kit
+npm install @theutkarshdev/rapid-api-kit
 ```
 
 ---
@@ -45,7 +46,7 @@ npm install rapid-api-kit
 Create a file (e.g., `server.js`):
 
 ```javascript
-const { rapidAPI } = require("rapid-api-kit");
+const { rapidAPI } = require("@theutkarshdev/rapid-api-kit");
 
 rapidAPI({
   mongoURI: "mongodb://localhost:27017/mydb",
@@ -59,6 +60,8 @@ rapidAPI({
         age: { type: Number },
         role: { type: String, enum: ["admin", "user"], default: "user" },
       },
+      searchBy: ["name", "email"], // Enable text search on these fields
+      filterBy: ["role", "age"], // Only these fields appear as filters in Swagger
     },
     {
       name: "posts",
@@ -68,6 +71,8 @@ rapidAPI({
         author: { type: String },
         published: { type: Boolean, default: false },
       },
+      searchBy: ["title", "body", "author"], // Full-text search fields
+      filterBy: ["author", "published"], // Filterable in Swagger UI
     },
   ],
 });
@@ -85,15 +90,17 @@ That's it! Open `http://localhost:3000/api/docs` to see your Swagger UI.
 
 ## Configuration
 
-| Option        | Type    | Default    | Description                                |
-| ------------- | ------- | ---------- | ------------------------------------------ |
-| `mongoURI`    | string  | _required_ | MongoDB connection string                  |
-| `port`        | number  | `3000`     | Server port                                |
-| `resources`   | array   | _required_ | Array of resource definitions              |
-| `apiPrefix`   | string  | `"/api"`   | Base path for all endpoints                |
-| `logging`     | boolean | `true`     | Enable Morgan request logging              |
-| `cors`        | object  | `{}`       | CORS options (passed to cors package)      |
-| `swaggerInfo` | object  | `{}`       | Custom Swagger title, description, version |
+| Option        | Type    | Default    | Description                                                                                                                       |
+| ------------- | ------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `mongoURI`    | string  | _required_ | MongoDB connection string                                                                                                         |
+| `port`        | number  | `3000`     | Server port                                                                                                                       |
+| `resources`   | array   | _required_ | Array of resource definitions                                                                                                     |
+| `apiPrefix`   | string  | `"/api"`   | Base path for all endpoints                                                                                                       |
+| `logging`     | boolean | `true`     | Enable Morgan request logging                                                                                                     |
+| `cors`        | object  | `{}`       | CORS options (passed to cors package)                                                                                             |
+| `swaggerInfo` | object  | `{}`       | Custom Swagger title, description, version                                                                                        |
+| `searchBy`    | array   | `[]`       | Fields for `?search=` text search (case-insensitive)                                                                              |
+| `filterBy`    | array   | `[]`       | Fields shown as query filters in Swagger UI. Enum/boolean → dropdown, others → text input. If omitted, all fields are filterable. |
 
 ### Resource Definition
 
@@ -106,7 +113,9 @@ That's it! Open `http://localhost:3000/api/docs` to see your Swagger UI.
     category: { type: String, enum: ["electronics", "books", "clothing"] },
     inStock:  { type: Boolean, default: true },
     tags:     [String],
-  }
+  },
+  searchBy: ["name"],                 // Fields for ?search=keyword (case-insensitive)
+  filterBy: ["category", "inStock"],  // Fields shown as query filters in Swagger UI
 }
 ```
 
@@ -136,6 +145,12 @@ GET /api/users?page=2&limit=5
 ```
 GET /api/users?sort=name          # ascending
 GET /api/users?sort=-createdAt    # descending (newest first)
+```
+
+### Search
+
+```
+GET /api/users?search=john        # searches across searchBy fields (case-insensitive)
 ```
 
 ### Filtering
