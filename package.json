@@ -1,7 +1,7 @@
 {
   "name": "@theutkarshdev/rapid-api-kit",
-  "version": "1.0.3",
-  "description": "Zero-config REST API generator. Give your MongoDB creds + schema, get full CRUD endpoints with Swagger docs instantly. Built for frontend students who need quick APIs.",
+  "version": "1.2.0",
+  "description": "Zero-config REST API generator with file uploads. Give your MongoDB creds + schema, get full CRUD endpoints with Swagger docs and Vercel Blob file uploads instantly.",
   "type": "module",
   "main": "dist/index.cjs",
   "module": "dist/index.js",
@@ -37,7 +37,10 @@
     "auto-api",
     "frontend-students",
     "mock-api",
-    "api-scaffold"
+    "api-scaffold",
+    "file-upload",
+    "vercel-blob",
+    "multipart"
   ],
   "author": "rapid-api <theutkarshdev>",
   "license": "MIT",

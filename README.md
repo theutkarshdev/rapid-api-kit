@@ -1,6 +1,6 @@
 # rapid-api-kit 🚀
 
-**Zero-config REST API generator.** Give your MongoDB creds + schema, get full CRUD endpoints with Swagger docs instantly.
+**Zero-config REST API generator.** Give your MongoDB creds + schema, get full CRUD endpoints with Swagger docs instantly. Now with **file upload** support via [Vercel Blob Storage](https://vercel.com/docs/storage/vercel-blob)!
 
 Built for **frontend students** who need quick backend APIs to practice with — no backend knowledge needed!
 
@@ -28,6 +28,7 @@ Plus:
 - **Search** — `?search=keyword` across configured fields
 - **Field selection** — `?fields=name,email`
 - **Validation** — Mongoose schema validation with clear error messages
+- **File Uploads** — `type: "File"` in your schema → automatic file upload via Vercel Blob Storage
 - **CORS** enabled by default
 - **Timestamps** — `createdAt` and `updatedAt` added automatically
 
@@ -99,6 +100,7 @@ That's it! Open `http://localhost:5000/api/docs` to see your Swagger UI.
 | `logging`     | boolean | `true`     | Enable Morgan request logging                                                                                                     |
 | `cors`        | object  | `{}`       | CORS options (passed to cors package)                                                                                             |
 | `swaggerInfo` | object  | `{}`       | Custom Swagger title, description, version                                                                                        |
+| `blobToken`   | string  | —          | Vercel Blob read-write token. **Required** when any resource uses `type: "File"` fields                                           |
 | `searchBy`    | array   | `[]`       | Fields for `?search=` text search (case-insensitive)                                                                              |
 | `filterBy`    | array   | `[]`       | Fields shown as query filters in Swagger UI. Enum/boolean → dropdown, others → text input. If omitted, all fields are filterable. |
 
@@ -129,6 +131,85 @@ That's it! Open `http://localhost:5000/api/docs` to see your Swagger UI.
 | `Date`    | `{ type: Date }`                          |
 | `Array`   | `[String]` or `{ type: [String] }`        |
 | `Enum`    | `{ type: String, enum: ["a", "b", "c"] }` |
+
+---
+
+## File Uploads (Vercel Blob Storage)
+
+rapid-api-kit supports **file uploads out of the box**. Just use `type: "File"` in your schema — files are automatically uploaded to [Vercel Blob Storage](https://vercel.com/docs/storage/vercel-blob) and the public URL is stored in MongoDB.
+
+### Setup
+
+1. **Create a Vercel Blob Store** — Go to your [Vercel dashboard](https://vercel.com/dashboard) → Storage → Create a Blob Store
+2. **Get your read-write token** — Copy the `BLOB_READ_WRITE_TOKEN` from the store settings
+3. **Pass it as `blobToken`** in your config
+
+### Example
+
+```javascript
+const { rapidAPI } = require("@theutkarshdev/rapid-api-kit");
+
+rapidAPI({
+  mongoURI: "mongodb://localhost:27017/mydb",
+  port: 5000,
+  blobToken: "vercel_blob_rw_xxxxxxxxxxxx", // Your Vercel Blob read-write token
+  resources: [
+    {
+      name: "users",
+      schema: {
+        name: { type: String, required: true },
+        email: { type: String, required: true },
+        avatar: "File", // Simple — any file, no restrictions
+        resume: {
+          type: "File",
+          required: true,
+          maxSize: 5, // Max 5 MB
+          accept: ".pdf,.doc,.docx", // Only these file types
+        },
+      },
+    },
+  ],
+});
+```
+
+### File Field Options
+
+| Option     | Type    | Default | Description                                                                                       |
+| ---------- | ------- | ------- | ------------------------------------------------------------------------------------------------- |
+| `type`     | string  | —       | Must be `"File"`                                                                                  |
+| `required` | boolean | `false` | Whether the file is required on create                                                            |
+| `maxSize`  | number  | `10`    | Maximum file size in **MB**                                                                       |
+| `accept`   | string  | —       | Allowed types — same syntax as HTML `<input accept="">`. Examples: `.pdf`, `image/*`, `image/png` |
+
+### How It Works
+
+- **POST** requests with file fields use `multipart/form-data` instead of JSON
+- Files are uploaded to Vercel Blob and the returned **public URL** is saved in MongoDB as a string
+- **PUT / PATCH** — uploading a new file automatically **deletes the old blob** from storage
+- **DELETE** — deleting a document automatically **deletes all associated blobs**
+- File path format in blob storage: `{resource}/{documentId}/{field}-{timestamp}.{ext}`
+
+### Uploading Files from Frontend
+
+```javascript
+// Using FormData to upload files
+const formData = new FormData();
+formData.append("name", "John Doe");
+formData.append("email", "john@test.com");
+formData.append("avatar", fileInput.files[0]); // File input element
+formData.append("resume", resumeInput.files[0]);
+
+const res = await fetch("http://localhost:5000/api/users", {
+  method: "POST",
+  body: formData, // No Content-Type header — browser sets it automatically
+});
+
+const { data } = await res.json();
+console.log(data.avatar); // → "https://xxxxxxxxx.public.blob.vercel-storage.com/users/abc123/avatar-1234567890.png"
+console.log(data.resume); // → "https://xxxxxxxxx.public.blob.vercel-storage.com/users/abc123/resume-1234567890.pdf"
+```
+
+> **Tip:** You can use the `blobToken` from an environment variable (e.g., `process.env.BLOB_READ_WRITE_TOKEN`) to keep it out of your code.
 
 ---
 
