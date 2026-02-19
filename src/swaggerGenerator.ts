@@ -2,8 +2,76 @@
  * Auto-generates a Swagger/OpenAPI 3.0 spec from registered resources
  */
 
+// ── Types ──────────────────────────────────────────────────────────
+
+interface SwaggerSchema {
+  type: string;
+  format?: string;
+  enum?: unknown[];
+  default?: unknown;
+  description?: string;
+  items?: SwaggerSchema;
+  properties?: Record<string, SwaggerSchema>;
+}
+
+interface SchemaFieldDef {
+  type?: unknown;
+  enum?: unknown[];
+  default?: unknown;
+  ref?: string;
+  required?: boolean;
+  [key: string]: unknown;
+}
+
+interface RegisteredResource {
+  name: string;
+  schema: Record<string, unknown>;
+  path: string;
+  searchBy: string[];
+  filterBy: string[];
+  fileFields: Array<{
+    fieldName: string;
+    required?: boolean;
+    maxSize?: number;
+    accept?: string;
+  }>;
+}
+
+interface SwaggerOptions {
+  title?: string;
+  description?: string;
+  version?: string;
+  port?: number;
+  apiPrefix?: string;
+}
+
+interface SwaggerParameter {
+  name: string;
+  in: string;
+  schema: Record<string, unknown>;
+  description: string;
+  required?: boolean;
+}
+
+interface SwaggerDoc {
+  openapi: string;
+  info: {
+    title: string;
+    description: string;
+    version: string;
+  };
+  servers: Array<{
+    url: string;
+    description: string;
+  }>;
+  paths: Record<string, unknown>;
+  components: {
+    schemas: Record<string, unknown>;
+  };
+}
+
 // Map Mongoose types → Swagger types
-const TYPE_MAP = {
+const TYPE_MAP: Record<string, SwaggerSchema> = {
   String: { type: "string" },
   Number: { type: "number" },
   Boolean: { type: "boolean" },
@@ -16,11 +84,21 @@ const TYPE_MAP = {
   Decimal128: { type: "number" },
 };
 
-function resolveSwaggerType(fieldDef) {
+function resolveSwaggerType(fieldDef: unknown): SwaggerSchema {
+  // Handle File type → Swagger binary for display schemas
+  if (
+    typeof fieldDef === "string" &&
+    (fieldDef === "File" || fieldDef === "file")
+  ) {
+    return { type: "string", description: "URL of uploaded file" };
+  }
+
   // Handle shorthand: { name: String } or { name: "String" }
   // Always spread to avoid mutating the shared TYPE_MAP objects
   if (typeof fieldDef === "function") {
-    return { ...(TYPE_MAP[fieldDef.name] || { type: "string" }) };
+    return {
+      ...(TYPE_MAP[(fieldDef as { name: string }).name] || { type: "string" }),
+    };
   }
   if (typeof fieldDef === "string") {
     return { ...(TYPE_MAP[fieldDef] || { type: "string" }) };
@@ -36,22 +114,40 @@ function resolveSwaggerType(fieldDef) {
   }
 
   // Handle object with `type` key
-  if (fieldDef && typeof fieldDef === "object" && fieldDef.type) {
-    const baseType = resolveSwaggerType(fieldDef.type);
+  if (
+    fieldDef &&
+    typeof fieldDef === "object" &&
+    (fieldDef as SchemaFieldDef).type
+  ) {
+    const typedField = fieldDef as SchemaFieldDef;
+
+    // Handle File type in object form
+    if (typedField.type === "File" || typedField.type === "file") {
+      const desc = [
+        "URL of uploaded file",
+        typedField.maxSize ? `Max: ${typedField.maxSize}MB` : "",
+        typedField.accept ? `Accepts: ${typedField.accept}` : "",
+      ]
+        .filter(Boolean)
+        .join(". ");
+      return { type: "string", description: desc };
+    }
+
+    const baseType = resolveSwaggerType(typedField.type);
 
     // Add enum if present
-    if (fieldDef.enum) {
-      baseType.enum = fieldDef.enum;
+    if (typedField.enum) {
+      baseType.enum = typedField.enum;
     }
 
     // Add default
-    if (fieldDef.default !== undefined) {
-      baseType.default = fieldDef.default;
+    if (typedField.default !== undefined) {
+      baseType.default = typedField.default;
     }
 
     // Add description from mongoose 'description' or 'ref'
-    if (fieldDef.ref) {
-      baseType.description = `Reference to ${fieldDef.ref}`;
+    if (typedField.ref) {
+      baseType.description = `Reference to ${typedField.ref}`;
     }
 
     return baseType;
@@ -59,8 +155,10 @@ function resolveSwaggerType(fieldDef) {
 
   // Nested object (sub-document)
   if (fieldDef && typeof fieldDef === "object") {
-    const properties = {};
-    for (const [key, val] of Object.entries(fieldDef)) {
+    const properties: Record<string, SwaggerSchema> = {};
+    for (const [key, val] of Object.entries(
+      fieldDef as Record<string, unknown>,
+    )) {
       properties[key] = resolveSwaggerType(val);
     }
     return { type: "object", properties };
@@ -69,9 +167,12 @@ function resolveSwaggerType(fieldDef) {
   return { type: "string" };
 }
 
-function buildSchemaProperties(schema) {
-  const properties = {};
-  const required = [];
+function buildSchemaProperties(schema: Record<string, unknown>): {
+  properties: Record<string, SwaggerSchema>;
+  required: string[];
+} {
+  const properties: Record<string, SwaggerSchema> = {};
+  const required: string[] = [];
 
   for (const [key, fieldDef] of Object.entries(schema)) {
     properties[key] = resolveSwaggerType(fieldDef);
@@ -81,7 +182,7 @@ function buildSchemaProperties(schema) {
       fieldDef &&
       typeof fieldDef === "object" &&
       !Array.isArray(fieldDef) &&
-      fieldDef.required === true
+      (fieldDef as SchemaFieldDef).required === true
     ) {
       required.push(key);
     }
@@ -96,8 +197,8 @@ function buildSchemaProperties(schema) {
  * - boolean fields → add explicit enum [true, false] for a dropdown
  * - everything else → bare type only (plain text input, no suggestions)
  */
-function buildFilterParamSchema(fieldSchema) {
-  const schema = { type: fieldSchema.type };
+function buildFilterParamSchema(fieldSchema: SwaggerSchema): SwaggerSchema {
+  const schema: SwaggerSchema = { type: fieldSchema.type };
 
   if (fieldSchema.enum) {
     // Enum field → dropdown
@@ -116,17 +217,20 @@ function buildFilterParamSchema(fieldSchema) {
   return schema;
 }
 
-function generateSwaggerDoc(resources, options = {}) {
+function generateSwaggerDoc(
+  resources: RegisteredResource[],
+  options: SwaggerOptions = {},
+): SwaggerDoc {
   const {
     title = "rapid-api-kit",
     description = "Auto-generated REST API documentation",
     version = "1.0.0",
-    port = 3000,
+    port = 5000,
     apiPrefix = "/api",
   } = options;
 
-  const paths = {};
-  const schemas = {};
+  const paths: Record<string, unknown> = {};
+  const schemas: Record<string, unknown> = {};
 
   for (const resource of resources) {
     const {
@@ -135,9 +239,14 @@ function generateSwaggerDoc(resources, options = {}) {
       path: basePath,
       searchBy = [],
       filterBy = [],
+      fileFields = [],
     } = resource;
     const capitalName = name.charAt(0).toUpperCase() + name.slice(1);
     const { properties, required } = buildSchemaProperties(schema);
+    const hasFileFields = fileFields.length > 0;
+
+    // Build file field names set for quick lookup
+    const fileFieldNames = new Set(fileFields.map((f) => f.fieldName));
 
     // ── Define schemas ─────────────────────────────────────────
     schemas[capitalName] = {
@@ -156,7 +265,134 @@ function generateSwaggerDoc(resources, options = {}) {
       ...(required.length > 0 ? { required } : {}),
     };
 
+    // Build multipart schema for resources with file fields
+    let postRequestBody: Record<string, unknown>;
+    let putPatchRequestBody: Record<string, unknown>;
+
+    if (hasFileFields) {
+      // Multipart properties: non-file fields stay as-is, file fields become binary
+      const multipartProps: Record<string, SwaggerSchema> = {};
+      for (const [key, val] of Object.entries(properties)) {
+        if (fileFieldNames.has(key)) {
+          const ff = fileFields.find((f) => f.fieldName === key);
+          multipartProps[key] = {
+            type: "string",
+            format: "binary",
+            description: [
+              "File upload",
+              ff?.maxSize ? `Max: ${ff.maxSize}MB` : "",
+              ff?.accept ? `Accepts: ${ff.accept}` : "",
+            ]
+              .filter(Boolean)
+              .join(". "),
+          };
+        } else {
+          multipartProps[key] = val;
+        }
+      }
+
+      postRequestBody = {
+        required: true,
+        content: {
+          "multipart/form-data": {
+            schema: {
+              type: "object",
+              properties: multipartProps,
+              ...(required.length > 0 ? { required } : {}),
+            },
+          },
+        },
+      };
+      putPatchRequestBody = {
+        required: true,
+        content: {
+          "multipart/form-data": {
+            schema: {
+              type: "object",
+              properties: multipartProps,
+            },
+          },
+        },
+      };
+    } else {
+      postRequestBody = {
+        required: true,
+        content: {
+          "application/json": {
+            schema: { $ref: `#/components/schemas/${capitalName}Input` },
+          },
+        },
+      };
+      putPatchRequestBody = {
+        required: true,
+        content: {
+          "application/json": {
+            schema: { $ref: `#/components/schemas/${capitalName}Input` },
+          },
+        },
+      };
+    }
+
     // ── Paths ──────────────────────────────────────────────────
+
+    const baseParams: SwaggerParameter[] = [
+      {
+        name: "page",
+        in: "query",
+        schema: { type: "integer", default: 1 },
+        description: "Page number",
+      },
+      {
+        name: "limit",
+        in: "query",
+        schema: { type: "integer", default: 10, maximum: 100 },
+        description: "Items per page",
+      },
+      {
+        name: "sort",
+        in: "query",
+        schema: { type: "string", default: "-createdAt" },
+        description: "Sort field (prefix with - for descending)",
+      },
+      {
+        name: "fields",
+        in: "query",
+        schema: { type: "string" },
+        description:
+          "Comma-separated field names to return in response (e.g. name,email)",
+      },
+    ];
+
+    const searchParams: SwaggerParameter[] =
+      searchBy.length > 0
+        ? [
+            {
+              name: "search",
+              in: "query",
+              schema: { type: "string" },
+              description: `Text search across fields: ${searchBy.join(", ")} (case-insensitive)`,
+              required: false,
+            },
+          ]
+        : [];
+
+    const filterParams: SwaggerParameter[] =
+      filterBy.length > 0
+        ? filterBy
+            .filter((field) => properties[field])
+            .map((field) => {
+              const paramSchema = buildFilterParamSchema(properties[field]);
+              return {
+                name: field,
+                in: "query",
+                schema: paramSchema as unknown as Record<string, unknown>,
+                description: paramSchema.enum
+                  ? `Filter by ${field} (${paramSchema.enum.join(", ")})`
+                  : `Filter by ${field}`,
+                required: false,
+              };
+            })
+        : [];
 
     // GET / and POST /
     paths[basePath] = {
@@ -164,73 +400,7 @@ function generateSwaggerDoc(resources, options = {}) {
         tags: [capitalName],
         summary: `List all ${name}`,
         description: `Retrieve a paginated list of ${name}. Supports filtering, sorting, field selection${searchBy.length > 0 ? " and text search (searchable fields: " + searchBy.join(", ") + ")" : ""}.${filterBy.length > 0 ? " Filterable fields: " + filterBy.join(", ") + "." : ""}`,
-        parameters: [
-          {
-            name: "page",
-            in: "query",
-            schema: { type: "integer", default: 1 },
-            description: "Page number",
-          },
-          {
-            name: "limit",
-            in: "query",
-            schema: { type: "integer", default: 10, maximum: 100 },
-            description: "Items per page",
-          },
-          {
-            name: "sort",
-            in: "query",
-            schema: { type: "string", default: "-createdAt" },
-            description: "Sort field (prefix with - for descending)",
-          },
-          {
-            name: "fields",
-            in: "query",
-            schema: { type: "string" },
-            description: "Comma-separated field names to return",
-          },
-          // Search param (only if searchBy is configured)
-          ...(searchBy.length > 0
-            ? [
-                {
-                  name: "search",
-                  in: "query",
-                  schema: { type: "string" },
-                  description: `Text search across fields: ${searchBy.join(", ")} (case-insensitive)`,
-                  required: false,
-                },
-              ]
-            : []),
-          // Only show filterable fields as query params
-          // enum / boolean → dropdown, everything else → plain text input
-          ...(filterBy.length > 0
-            ? filterBy
-                .filter((field) => properties[field])
-                .map((field) => {
-                  const paramSchema = buildFilterParamSchema(properties[field]);
-                  return {
-                    name: field,
-                    in: "query",
-                    schema: paramSchema,
-                    description: paramSchema.enum
-                      ? `Filter by ${field} (${paramSchema.enum.join(", ")})`
-                      : `Filter by ${field}`,
-                    required: false,
-                  };
-                })
-            : Object.keys(properties).map((field) => {
-                const paramSchema = buildFilterParamSchema(properties[field]);
-                return {
-                  name: field,
-                  in: "query",
-                  schema: paramSchema,
-                  description: paramSchema.enum
-                    ? `Filter by ${field} (${paramSchema.enum.join(", ")})`
-                    : `Filter by ${field}`,
-                  required: false,
-                };
-              })),
-        ],
+        parameters: [...baseParams, ...searchParams, ...filterParams],
         responses: {
           200: {
             description: `List of ${name}`,
@@ -265,15 +435,8 @@ function generateSwaggerDoc(resources, options = {}) {
       post: {
         tags: [capitalName],
         summary: `Create a new ${name.slice(0, -1) || name}`,
-        description: `Create a new ${name.slice(0, -1) || name} record`,
-        requestBody: {
-          required: true,
-          content: {
-            "application/json": {
-              schema: { $ref: `#/components/schemas/${capitalName}Input` },
-            },
-          },
-        },
+        description: `Create a new ${name.slice(0, -1) || name} record${hasFileFields ? " (multipart/form-data for file uploads)" : ""}`,
+        requestBody: postRequestBody,
         responses: {
           201: {
             description: `${capitalName} created successfully`,
@@ -294,6 +457,50 @@ function generateSwaggerDoc(resources, options = {}) {
         },
       },
     };
+
+    // GET /filters/:field — Get distinct values for a filterable field
+    if (filterBy.length > 0) {
+      paths[`${basePath}/filters/{field}`] = {
+        get: {
+          tags: [capitalName],
+          summary: `Get distinct values for a filterable field on ${name}`,
+          description: `Returns all unique values for a given filterable field. Use this to populate \`<select>\` dropdowns in the frontend. Allowed fields: ${filterBy.join(", ")}.`,
+          parameters: [
+            {
+              name: "field",
+              in: "path",
+              required: true,
+              schema: { type: "string", enum: filterBy },
+              description: `Filterable field name (${filterBy.join(", ")})`,
+            },
+          ],
+          responses: {
+            200: {
+              description: "Distinct values for the field",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      success: { type: "boolean" },
+                      resource: { type: "string" },
+                      field: { type: "string" },
+                      count: { type: "integer" },
+                      values: {
+                        type: "array",
+                        items: {},
+                        description: "Sorted list of unique values",
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            400: { description: "Field is not filterable" },
+          },
+        },
+      };
+    }
 
     // GET /:id, PUT /:id, PATCH /:id, DELETE /:id
     paths[`${basePath}/{id}`] = {
@@ -331,7 +538,7 @@ function generateSwaggerDoc(resources, options = {}) {
       put: {
         tags: [capitalName],
         summary: `Replace a ${name.slice(0, -1) || name}`,
-        description: `Fully replace a ${name.slice(0, -1) || name} by ID`,
+        description: `Fully replace a ${name.slice(0, -1) || name} by ID${hasFileFields ? " (multipart/form-data for file uploads)" : ""}`,
         parameters: [
           {
             name: "id",
@@ -341,14 +548,7 @@ function generateSwaggerDoc(resources, options = {}) {
             description: "MongoDB ObjectId",
           },
         ],
-        requestBody: {
-          required: true,
-          content: {
-            "application/json": {
-              schema: { $ref: `#/components/schemas/${capitalName}Input` },
-            },
-          },
-        },
+        requestBody: putPatchRequestBody,
         responses: {
           200: {
             description: `${capitalName} updated`,
@@ -371,7 +571,7 @@ function generateSwaggerDoc(resources, options = {}) {
       patch: {
         tags: [capitalName],
         summary: `Update a ${name.slice(0, -1) || name}`,
-        description: `Partially update a ${name.slice(0, -1) || name} by ID`,
+        description: `Partially update a ${name.slice(0, -1) || name} by ID${hasFileFields ? " (multipart/form-data for file uploads)" : ""}`,
         parameters: [
           {
             name: "id",
@@ -381,14 +581,7 @@ function generateSwaggerDoc(resources, options = {}) {
             description: "MongoDB ObjectId",
           },
         ],
-        requestBody: {
-          required: true,
-          content: {
-            "application/json": {
-              schema: { $ref: `#/components/schemas/${capitalName}Input` },
-            },
-          },
-        },
+        requestBody: putPatchRequestBody,
         responses: {
           200: {
             description: `${capitalName} updated`,
@@ -461,4 +654,5 @@ function generateSwaggerDoc(resources, options = {}) {
   };
 }
 
-module.exports = { generateSwaggerDoc };
+export { generateSwaggerDoc };
+export type { RegisteredResource, SwaggerOptions, SwaggerDoc };

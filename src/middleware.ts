@@ -1,8 +1,14 @@
+import type { Request, Response, NextFunction } from "express";
+
 /**
  * Express middleware for error handling and 404s
  */
 
-function notFoundHandler(req, res, next) {
+function notFoundHandler(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
   res.status(404).json({
     success: false,
     error: `Route not found: ${req.method} ${req.originalUrl}`,
@@ -10,23 +16,37 @@ function notFoundHandler(req, res, next) {
   });
 }
 
-function errorHandler(err, req, res, next) {
+interface AppError extends Error {
+  status?: number;
+  type?: string;
+  path?: string;
+  value?: unknown;
+}
+
+function errorHandler(
+  err: AppError,
+  req: Request,
+  res: Response,
+  _next: NextFunction,
+): void {
   console.error("❌ [rapid-api-kit] Error:", err.message);
 
   // Mongoose CastError (bad ObjectId, etc.)
   if (err.name === "CastError") {
-    return res.status(400).json({
+    res.status(400).json({
       success: false,
       error: `Invalid ${err.path}: ${err.value}`,
     });
+    return;
   }
 
   // JSON parse error
   if (err.type === "entity.parse.failed") {
-    return res.status(400).json({
+    res.status(400).json({
       success: false,
       error: "Invalid JSON in request body",
     });
+    return;
   }
 
   // Default server error
@@ -36,4 +56,4 @@ function errorHandler(err, req, res, next) {
   });
 }
 
-module.exports = { notFoundHandler, errorHandler };
+export { notFoundHandler, errorHandler };

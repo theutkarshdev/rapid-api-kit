@@ -1,30 +1,59 @@
-const express = require("express");
-const mongoose = require("mongoose");
-const cors = require("cors");
-const morgan = require("morgan");
-const swaggerUi = require("swagger-ui-express");
-const { createRouter } = require("./createRouter");
-const { generateSwaggerDoc } = require("./swaggerGenerator");
-const { errorHandler, notFoundHandler } = require("./middleware");
+import type { Express } from "express";
+import type { Mongoose } from "mongoose";
+import type { Server } from "http";
+import express from "express";
+import mongoose from "mongoose";
+import cors from "cors";
+import morgan from "morgan";
+import swaggerUi from "swagger-ui-express";
+import { createRouter } from "./createRouter.js";
+import { generateSwaggerDoc } from "./swaggerGenerator.js";
+import { errorHandler, notFoundHandler } from "./middleware.js";
+import {
+  extractFileFields,
+  convertFileFieldsForMongoose,
+} from "./fileUpload.js";
+import type { FileFieldConfig } from "./fileUpload.js";
+
+// ── Types ──────────────────────────────────────────────────────────
+
+interface ResourceDefinition {
+  name: string;
+  schema: Record<string, unknown>;
+  searchBy?: string[];
+  filterBy?: string[];
+}
+
+interface SwaggerInfo {
+  title?: string;
+  description?: string;
+  version?: string;
+}
+
+interface RapidAPIConfig {
+  port?: number;
+  mongoURI: string;
+  resources: ResourceDefinition[];
+  cors?: Record<string, unknown>;
+  logging?: boolean;
+  apiPrefix?: string;
+  swaggerInfo?: SwaggerInfo;
+  blobToken?: string;
+}
+
+interface RapidAPIResult {
+  app: Express;
+  server: Server;
+  mongoose: Mongoose;
+}
 
 /**
  * rapidAPI - Zero-config REST API generator
  *
- * @param {Object} config
- * @param {number}  [config.port=3000]         - Port to run the server on
- * @param {string}  config.mongoURI            - MongoDB connection string
- * @param {Array}   config.resources           - Array of resource definitions
- * @param {string}  config.resources[].name       - Resource/collection name (e.g. "users")
- * @param {Object}  config.resources[].schema     - Mongoose-style schema definition
- * @param {Array}   [config.resources[].searchBy] - Fields to enable text search on (GET /search?q=)
- * @param {Array}   [config.resources[].filterBy] - Fields allowed for query filtering (restricts which fields work as filters)
- * @param {Object}  [config.cors]              - CORS options (passed to cors middleware)
- * @param {boolean} [config.logging=true]      - Enable request logging
- * @param {string}  [config.apiPrefix="/api"]  - Base path prefix for all routes
- * @param {Object}  [config.swaggerInfo]       - Custom Swagger info (title, description, version)
- * @returns {Promise<{app: Express, server: http.Server, mongoose: Mongoose}>}
+ * @param config - Configuration object
+ * @returns Promise resolving to Express app, HTTP server, and Mongoose instance
  */
-async function rapidAPI(config = {}) {
+async function rapidAPI(config: RapidAPIConfig): Promise<RapidAPIResult> {
   // ── Validate config ──────────────────────────────────────────────
   if (!config.mongoURI) {
     throw new Error(
@@ -43,14 +72,27 @@ async function rapidAPI(config = {}) {
   }
 
   const {
-    port = 3000,
+    port = 5000,
     mongoURI,
     resources,
     cors: corsOptions = {},
     logging = true,
     apiPrefix = "/api",
     swaggerInfo = {},
+    blobToken,
   } = config;
+
+  // ── Validate blobToken if any resource uses File fields ────────
+  const hasFileFields = resources.some((r) => {
+    const fields = extractFileFields(r.schema);
+    return fields.length > 0;
+  });
+  if (hasFileFields && !blobToken) {
+    throw new Error(
+      "❌ [rapid-api-kit] blobToken is required when using File fields. " +
+        "Get a read-write token from Vercel Blob Storage.",
+    );
+  }
 
   // ── Create Express app ───────────────────────────────────────────
   const app = express();
@@ -69,12 +111,19 @@ async function rapidAPI(config = {}) {
     console.log("✅ [rapid-api-kit] Connected to MongoDB successfully!");
   } catch (err) {
     throw new Error(
-      `❌ [rapid-api-kit] MongoDB connection failed: ${err.message}`,
+      `❌ [rapid-api-kit] MongoDB connection failed: ${(err as Error).message}`,
     );
   }
 
   // ── Register resources ───────────────────────────────────────────
-  const registeredResources = [];
+  const registeredResources: Array<{
+    name: string;
+    schema: Record<string, unknown>;
+    path: string;
+    searchBy: string[];
+    filterBy: string[];
+    fileFields: FileFieldConfig[];
+  }> = [];
 
   for (const resource of resources) {
     if (!resource.name) {
@@ -87,10 +136,21 @@ async function rapidAPI(config = {}) {
     }
 
     const resourceName = resource.name.toLowerCase();
-    const mongooseSchema = new mongoose.Schema(resource.schema, {
-      timestamps: true,
-      versionKey: false,
-    });
+
+    // Detect and convert File fields
+    const fileFields = extractFileFields(resource.schema);
+    const finalSchema =
+      fileFields.length > 0
+        ? convertFileFieldsForMongoose(resource.schema, fileFields)
+        : resource.schema;
+
+    const mongooseSchema = new mongoose.Schema(
+      finalSchema as Record<string, mongoose.SchemaDefinitionProperty>,
+      {
+        timestamps: true,
+        versionKey: false,
+      },
+    );
 
     // Avoid model recompilation in hot-reload scenarios
     const Model =
@@ -100,7 +160,12 @@ async function rapidAPI(config = {}) {
     const searchBy = Array.isArray(resource.searchBy) ? resource.searchBy : [];
     const filterBy = Array.isArray(resource.filterBy) ? resource.filterBy : [];
 
-    const router = createRouter(Model, resourceName, { searchBy, filterBy });
+    const router = createRouter(Model, resourceName, {
+      searchBy,
+      filterBy,
+      fileFields,
+      blobToken,
+    });
     const routePath = `${apiPrefix}/${resourceName}`;
     app.use(routePath, router);
 
@@ -110,10 +175,14 @@ async function rapidAPI(config = {}) {
       path: routePath,
       searchBy,
       filterBy,
+      fileFields,
     });
 
     console.log(`📦 [rapid-api-kit] Resource "${resourceName}" registered:`);
     console.log(`   GET    ${routePath}`);
+    if (filterBy.length > 0) {
+      console.log(`   GET    ${routePath}/filters/:field`);
+    }
     if (searchBy.length > 0) {
       console.log(
         `          ↳ search:   ?search=keyword  (fields: ${searchBy.join(", ")})`,
@@ -129,6 +198,11 @@ async function rapidAPI(config = {}) {
     console.log(`   PUT    ${routePath}/:id`);
     console.log(`   PATCH  ${routePath}/:id`);
     console.log(`   DELETE ${routePath}/:id`);
+    if (fileFields.length > 0) {
+      console.log(
+        `          ↳ files:    ${fileFields.map((f) => f.fieldName).join(", ")} (uploaded to Vercel Blob)`,
+      );
+    }
   }
 
   // ── Swagger Docs ─────────────────────────────────────────────────
@@ -148,14 +222,14 @@ async function rapidAPI(config = {}) {
   );
 
   // Serve raw swagger JSON
-  app.get(`${apiPrefix}/docs.json`, (req, res) => {
+  app.get(`${apiPrefix}/docs.json`, (_req, res) => {
     res.json(swaggerDoc);
   });
 
   console.log(`📚 [rapid-api-kit] Swagger Docs available at ${apiPrefix}/docs`);
 
   // ── Home route ───────────────────────────────────────────────────
-  app.get("/", (req, res) => {
+  app.get("/", (_req, res) => {
     res.json({
       message: "🚀 rapid-api-kit is running!",
       docs: `${apiPrefix}/docs`,
@@ -191,4 +265,5 @@ async function rapidAPI(config = {}) {
   return { app, server, mongoose };
 }
 
-module.exports = { rapidAPI };
+export { rapidAPI };
+export type { RapidAPIConfig, RapidAPIResult, ResourceDefinition, SwaggerInfo };

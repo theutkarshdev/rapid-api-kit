@@ -2,14 +2,27 @@
   "name": "@theutkarshdev/rapid-api-kit",
   "version": "1.0.3",
   "description": "Zero-config REST API generator. Give your MongoDB creds + schema, get full CRUD endpoints with Swagger docs instantly. Built for frontend students who need quick APIs.",
-  "main": "src/index.js",
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
   "files": [
-    "src/",
+    "dist/",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "example": "node example/index.js",
+    "build": "tsup",
+    "example:js": "node example/javascript/index.js",
+    "example:ts": "tsx example/typescript/index.ts",
+    "dev": "tsx example/typescript/index.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
@@ -29,11 +42,25 @@
   "author": "rapid-api <theutkarshdev>",
   "license": "MIT",
   "dependencies": {
+    "@vercel/blob": "^2.2.0",
     "cors": "^2.8.5",
+    "dotenv": "^17.3.1",
     "express": "^4.18.2",
     "mongoose": "^8.0.0",
     "morgan": "^1.10.0",
+    "multer": "^2.0.2",
     "swagger-ui-express": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/morgan": "^1.9.9",
+    "@types/multer": "^2.0.0",
+    "@types/node": "^20.11.0",
+    "@types/swagger-ui-express": "^4.1.6",
+    "tsup": "^8.0.1",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
   },
   "repository": {
     "type": "git",

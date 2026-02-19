@@ -50,7 +50,7 @@ const { rapidAPI } = require("@theutkarshdev/rapid-api-kit");
 
 rapidAPI({
   mongoURI: "mongodb://localhost:27017/mydb",
-  port: 3000,
+  port: 5000,
   resources: [
     {
       name: "users",
@@ -84,7 +84,7 @@ Run it:
 node server.js
 ```
 
-That's it! Open `http://localhost:3000/api/docs` to see your Swagger UI.
+That's it! Open `http://localhost:5000/api/docs` to see your Swagger UI.
 
 ---
 
@@ -93,7 +93,7 @@ That's it! Open `http://localhost:3000/api/docs` to see your Swagger UI.
 | Option        | Type    | Default    | Description                                                                                                                       |
 | ------------- | ------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | `mongoURI`    | string  | _required_ | MongoDB connection string                                                                                                         |
-| `port`        | number  | `3000`     | Server port                                                                                                                       |
+| `port`        | number  | `5000`     | Server port                                                                                                                       |
 | `resources`   | array   | _required_ | Array of resource definitions                                                                                                     |
 | `apiPrefix`   | string  | `"/api"`   | Base path for all endpoints                                                                                                       |
 | `logging`     | boolean | `true`     | Enable Morgan request logging                                                                                                     |
@@ -223,11 +223,11 @@ GET /api/users?fields=name,email
 
 ```javascript
 // List all users
-const res = await fetch("http://localhost:3000/api/users");
+const res = await fetch("http://localhost:5000/api/users");
 const { data } = await res.json();
 
 // Create user
-await fetch("http://localhost:3000/api/users", {
+await fetch("http://localhost:5000/api/users", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({ name: "John", email: "john@test.com" }),
@@ -237,7 +237,7 @@ await fetch("http://localhost:3000/api/users", {
 ### Angular (HttpClient)
 
 ```typescript
-this.http.get("http://localhost:3000/api/users").subscribe((res) => {
+this.http.get("http://localhost:5000/api/users").subscribe((res) => {
   this.users = res.data;
 });
 ```
@@ -245,7 +245,7 @@ this.http.get("http://localhost:3000/api/users").subscribe((res) => {
 ### Next.js (API route / Server Component)
 
 ```javascript
-const res = await fetch("http://localhost:3000/api/users", {
+const res = await fetch("http://localhost:5000/api/users", {
   cache: "no-store",
 });
 const { data } = await res.json();
